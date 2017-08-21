@@ -1,0 +1,4 @@
+ERROR: Looks like GPU0 are stopped. Restart attempt.
+ERROR: Looks like GPU1 are stopped. Restart attempt.
+CUDA: Device: 0 Thread exited with code: 46
+CUDA: Device: 1 Thread exited with code: 46

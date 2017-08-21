@@ -1,0 +1,4 @@
+todayShutdowns=0
+totalShutdowns=0
+totalTime=PT4M47.288S
+todayDate=2017-08-21

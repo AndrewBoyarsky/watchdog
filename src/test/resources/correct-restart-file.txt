@@ -1,0 +1,6 @@
+CUDA: Device: 0 Thread exited with code: 30
+CUDA: Device: 1 Thread exited with code: 30
+ERROR: Looks like GPU0 are stopped. Restart attempt.
+ERROR: Looks like GPU1 are stopped. Restart attempt.
+Speed: Gpu0 505 Sol/s, GPU1 310 Sol/s
+Total speed: 815 Sol/s
