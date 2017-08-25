@@ -7,7 +7,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URISyntaxException;
-import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -54,7 +53,6 @@ public class ApplicationEntryTest {
         catch (URISyntaxException e) {
             LOG.error("Cant load file miner.log from resources", e);
         }
-        renewData();
     }
 
     @After
@@ -68,8 +66,7 @@ public class ApplicationEntryTest {
         Files.deleteIfExists(TEST_DIR_PATH);
     }
 
-    @AfterClass
-    public static void renewData() throws IOException {
+    private void changeStats() throws Exception {
         Map<String, String> stats = ApplicationEntry.readStats(statsFilePath);
         stats.put("totalShutdowns", "0");
         stats.put("todayShutdowns", "0");
@@ -79,34 +76,74 @@ public class ApplicationEntryTest {
 
     @Before
     public void setUp() throws Exception {
+        TimeUnit.MILLISECONDS.sleep(10);
         Files.createDirectory(TEST_DIR_PATH);
         Files.copy(new File(ApplicationEntryTest.class.getClassLoader().getResource("miner.log").toURI()).toPath(), TEST_MINER_LOG_FILE_PATH);
     }
 
+    public void changeProperties(String processName, Path fileName, long sleepDuration) {
+        Properties properties = ApplicationEntry.getParams();
+        properties.setProperty("processName", processName);
+        properties.setProperty("fileName", fileName.toString());
+        properties.setProperty("sleepDuration", Long.toString(sleepDuration));
+    }
+
     @Test
     public void testMain() throws Exception {
-        Properties properties = ApplicationEntry.getPROPS();
-        properties.setProperty("processName", "Core Temp.exe");
-        properties.setProperty("fileName", TEST_MINER_LOG_FILE_PATH.toString());
-        startProcesses();
+        changeProperties("Core Temp.exe", TEST_MINER_LOG_FILE_PATH, 10000);
+        startApps();
         setMovedMinerLogFilePath();
+        LocalDateTime currentDateTime = LocalDateTime.now();
         ApplicationEntry.main(null);
         cancelShutdown();
         tearDown();
-        TimeUnit.MILLISECONDS.sleep(20);
+        TimeUnit.MILLISECONDS.sleep(200);
         setUp();
         Map<String, String> stats = ApplicationEntry.readStats(statsFilePath);
-        Assert.assertEquals(stats.get("totalShutdowns"), "1");
-        Assert.assertEquals(stats.get("todayShutdowns"), "1");
+        Assert.assertEquals("1", stats.get("totalShutdowns"));
+        Assert.assertEquals("1", stats.get("todayShutdowns"));
+        Assert.assertEquals(currentDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")), stats.get("lastShutdownDateTime"));
         stats.put("todayDate", "2017-08-20");
         ApplicationEntry.writeStats(statsFilePath, stats);
-        startProcesses();
+        startApps();
         setMovedMinerLogFilePath();
+        currentDateTime = LocalDateTime.now();
         ApplicationEntry.main(null);
         cancelShutdown();
         stats = ApplicationEntry.readStats(statsFilePath);
         Assert.assertEquals("1", stats.get("todayShutdowns"));
         Assert.assertEquals("2", stats.get("totalShutdowns"));
+        Assert.assertEquals(currentDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")), stats.get("lastShutdownDateTime"));
+        changeStats();
+    }
+
+    @Test
+    public void testResetShutdowns() throws Exception {
+        changeProperties("", Paths.get(""), 10);
+        setMovedMinerLogFilePath();
+        Map<String, String> stats = ApplicationEntry.readStats(statsFilePath);
+        stats.put("todayShutdowns", "1");
+        stats.put("totalShutdowns", "1");
+        stats.put("todayDate", LocalDate.now().minusDays(1).toString());
+        ApplicationEntry.writeStats(statsFilePath, stats);
+        Thread thread = new Thread(() -> {
+            try {
+                ApplicationEntry.main(null);
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+        thread.start();
+        TimeUnit.MILLISECONDS.sleep(1000);
+        synchronized (ApplicationEntry.class) {
+            stats = ApplicationEntry.readStats(statsFilePath);
+        }
+        thread.stop();
+        Assert.assertEquals("1", stats.get("totalShutdowns"));
+        Assert.assertEquals("0", stats.get("todayShutdowns"));
+        Assert.assertEquals(LocalDate.now().toString(), stats.get("todayDate"));
+        changeStats();
     }
 
     private void cancelShutdown() throws InterruptedException, IOException {
@@ -126,7 +163,7 @@ public class ApplicationEntryTest {
         cancelShutdown();
     }
 
-    private void startProcesses() throws Exception {
+    private void startApps() throws Exception {
         for (int i = 0; i < programList.size(); i++) {
             ProcessBuilder builder = new ProcessBuilder("cmd.exe", "/c", "cd \"" + programDirectoriesList.get(i) + "\" && \"" + programList.get(i) +
                     "\"");
@@ -145,7 +182,7 @@ public class ApplicationEntryTest {
         Runtime runtime = Runtime.getRuntime();
         ApplicationEntry.killProcess("Some process.exe");
 
-        startProcesses();
+        startApps();
         for (int i = 0; i < programList.size(); i++) {
             ApplicationEntry.killProcess(programList.get(i));
         }
@@ -178,7 +215,7 @@ public class ApplicationEntryTest {
 
     }
 
-    @Test(expected = AccessDeniedException.class)
+    @Test
     public void testIsHangingUp() throws Exception {
         Assert.assertTrue(ApplicationEntry.isHangingUp(originalMinerLogFilePath));
         Assert.assertTrue(ApplicationEntry.isHangingUp(restartFilePath));
@@ -187,9 +224,6 @@ public class ApplicationEntryTest {
         Assert.assertFalse(ApplicationEntry.isHangingUp(emptyLinesFilePath));
         Assert.assertFalse(ApplicationEntry.isHangingUp(wrongFilePath));
         Assert.assertFalse(ApplicationEntry.isHangingUp(correctRestartFilePath));
-
-        ApplicationEntry.isHangingUp(TEST_DIR_PATH);
-
     }
 
 }

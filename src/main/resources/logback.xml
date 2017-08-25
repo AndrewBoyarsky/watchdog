@@ -5,18 +5,20 @@
     <jmxConfigurator/>
 
     <appender name="file" class="ch.qos.logback.core.FileAppender">
-        <file>/log/ewbfwatchdog.log</file>
+        <file>watchdog-0.1c/logs/ewbfwatchdog.log</file>
 
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%date %-5level %logger{0} [%file:%line] %msg%n</pattern>
+            <!--<pattern>%date %-5level %logger{0} [%file:%line] %msg%n</pattern>-->
+            <pattern>%date %-5level %msg%n</pattern>
         </encoder>
     </appender>
 
     <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%date %-5level %logger{0} [%file:%line] %msg%n</pattern>
+            <pattern>%date %-5level %msg%n</pattern>
+            <!--<pattern>%date %-5level %logger{0} [%file:%line] %msg%n</pattern>-->
         </encoder>
     </appender>
 

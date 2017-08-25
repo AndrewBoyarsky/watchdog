@@ -28,8 +28,8 @@ public class ApplicationEntry {
             PARAMS.load(ApplicationEntry.class.getClassLoader().getResourceAsStream("params.properties"));
         }
         catch (IOException e) {
-            LOG.info("Wrong file name. ", e);
-            System.exit(-1);
+            LOG.error("Wrong file name", e);
+            System.exit(1);
         }
     }
 
@@ -50,18 +50,19 @@ public class ApplicationEntry {
         Files.write(path, statStrings, StandardOpenOption.CREATE);
     }
 
-    public static Properties getPROPS() {
+    public static Properties getParams() {
         return PARAMS;
     }
 
     public static void main(String[] args) throws URISyntaxException, IOException {
         Map<String, String> stats = readStats(statsFilePath);
-        TOTAL_TIME = Duration.parse(stats.get("totalTime"));
         final LocalDateTime startDateTime = LocalDateTime.now();
+        TOTAL_TIME = Duration.parse(stats.get("totalTime"));
+        double sleepDuration = Long.parseLong(PARAMS.getProperty("sleepDuration")) / 1000d;
         Path logFilePath = Paths.get(PARAMS.getProperty("fileName"));
         LocalDateTime currentDateTime = LocalDateTime.now();
         Duration duration = Duration.between(startDateTime, currentDateTime);
-        LOG.info("===========EWBF CUDA Miner Watchdog v{}===========", PARAMS.getProperty("programVersion"));
+        LOG.info("===========EWBF CUDA MINER WATCHDOG v{}===========", PARAMS.getProperty("programVersion"));
         LOG.info("Got file with path {}.  Starting program...", logFilePath.toString());
         byte i = 2, j = 0;
         exitLabel:
@@ -69,17 +70,28 @@ public class ApplicationEntry {
             LOG.info("--------------NEW ITERATION--------------");
             Duration prevDuration = duration;
             duration = Duration.between(startDateTime, currentDateTime);
+            TOTAL_TIME = TOTAL_TIME.plusMillis(duration.toMillis() - prevDuration.toMillis());
             if (i == 2) {
-                printTime(prevDuration, duration);
-                LOG.info("Today shutdowns - {}. Total shutdowns - {}", stats.get("todayShutdowns"), stats.get("totalShutdowns"));
+                printTime(duration);
+                LOG.info("TODAY SHUTDOWNS - {}. TOTAL SHUTDOWNS - {}. LAST IN {}", stats.get("todayShutdowns"), stats.get("totalShutdowns"), stats
+                        .get("lastShutdownDateTime"));
                 i = 0;
             }
             if (j == 20) {
-                try {stats.put("totalTime", TOTAL_TIME.toString()); writeStats(statsFilePath, stats);}
-                catch (IOException e) {LOG.warn("Cannot write total time!", e);}
+                try {
+                    stats.put("totalTime", TOTAL_TIME.toString());
+                    if (!stats.get("todayDate").equalsIgnoreCase(currentDateTime.toLocalDate().toString())) {
+                        stats.put("todayDate", currentDateTime.toLocalDate().toString());
+                        stats.put("todayShutdowns", "0");
+                    }
+                    writeStats(statsFilePath, stats);
+                }
+                catch (IOException e) {
+                    LOG.warn("Cannot write to file.", e);
+                }
                 j = 0;
             }
-            LOG.info("Starting check out file {}", logFilePath);
+            LOG.info("Starting check out file: {}.", logFilePath);
             try {
                 if (isHangingUp(logFilePath)) {
                     LOG.warn("Miner is hanging! Killing process {}", PARAMS.getProperty("processName"));
@@ -97,6 +109,7 @@ public class ApplicationEntry {
                                         stats.put("todayShutdowns", "1");
                                         stats.put("todayDate", currentDateTime.toLocalDate().toString());
                                     }
+                                    stats.put("lastShutdownDateTime", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
                                     writeStats(statsFilePath, stats);
                                     rebootComputer(20);
                                     LOG.info("Shutdown process has been executed.");
@@ -121,8 +134,8 @@ public class ApplicationEntry {
                 LOG.warn("Checking out is interrupted. ", e);
             }
             try {
-                LOG.info("Sleeping for {} seconds", PARAMS.getProperty("sleepDuration"));
-                TimeUnit.SECONDS.sleep(Long.parseLong(PARAMS.getProperty("sleepDuration")));
+                LOG.info("Sleeping for {} seconds", sleepDuration);
+                TimeUnit.MILLISECONDS.sleep((long) (sleepDuration * 1000));
             }
             catch (InterruptedException e) {
                 LOG.warn("Waiting is interrupted. Program is  executing now.", e);
@@ -135,15 +148,13 @@ public class ApplicationEntry {
         LOG.info("========EXIT=========");
     }
 
-    private static void printTime(Duration prevDuration, Duration duration) {
+    private static void printTime(Duration duration) {
         long hours = duration.toHours();
         long minutes = duration.toMinutes() - (60 * hours);
-        TOTAL_TIME = TOTAL_TIME.plusMillis(duration.toMillis() - prevDuration.toMillis());
         LOG.info("Time: {}:{}\nTotal time: {} days {} hours {} minutes", (hours < 10 ? "0" + hours : hours), (minutes < 10 ? "0" + minutes :
                         minutes),
                 TOTAL_TIME.toDays(), TOTAL_TIME.toHours() - TOTAL_TIME.toDays() * 24, TOTAL_TIME.toMinutes() - TOTAL_TIME.toHours() *
                         60);
-
     }
 
     public static void rebootComputer(int delay) throws IOException {
