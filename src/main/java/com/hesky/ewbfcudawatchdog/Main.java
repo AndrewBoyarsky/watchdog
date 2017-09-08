@@ -4,7 +4,9 @@ import org.slf4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URISyntaxException;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -17,15 +19,15 @@ import java.util.concurrent.TimeUnit;
 
 import static org.slf4j.LoggerFactory.getLogger;
 
-public class ApplicationEntry {
-    private static final Logger LOG = getLogger(ApplicationEntry.class);
+public class Main {
+    private static final Logger LOG = getLogger(Main.class);
     private static final Properties PARAMS = new Properties();
     private static Duration TOTAL_TIME;
     private static Path statsFilePath = new File("stats.txt").toPath();
 
     static {
         try {
-            PARAMS.load(ApplicationEntry.class.getClassLoader().getResourceAsStream("params.properties"));
+            PARAMS.load(Main.class.getClassLoader().getResourceAsStream("params.properties"));
         }
         catch (IOException e) {
             LOG.error("Wrong file name", e);
@@ -36,8 +38,8 @@ public class ApplicationEntry {
     public static Map<String, String> readStats(Path path) throws IOException {
         List<String> stats = Files.readAllLines(path);
         Map<String, String> map = new HashMap<>();
-        for (int i = 0; i < stats.size(); i++) {
-            String[] pv = stats.get(i).split("=");
+        for (String stat : stats) {
+            String[] pv = stat.split("=");
             map.put(pv[0], pv[1]);
         }
         return map;
@@ -54,15 +56,20 @@ public class ApplicationEntry {
         return PARAMS;
     }
 
+    private static String get(String propertyName) {
+        return PARAMS.getProperty(propertyName);
+    }
+
     public static void main(String[] args) throws URISyntaxException, IOException {
         Map<String, String> stats = readStats(statsFilePath);
         final LocalDateTime startDateTime = LocalDateTime.now();
         TOTAL_TIME = Duration.parse(stats.get("totalTime"));
-        double sleepDuration = Long.parseLong(PARAMS.getProperty("sleepDuration")) / 1000d;
-        Path logFilePath = Paths.get(PARAMS.getProperty("fileName"));
+        long sleepDurationMillis = Long.parseLong(get("sleepDuration"));
+        double sleepDurationSecs = Long.parseLong(get("sleepDuration")) / 1000d;
+        Path logFilePath = Paths.get(get("fileName"));
         LocalDateTime currentDateTime = LocalDateTime.now();
         Duration duration = Duration.between(startDateTime, currentDateTime);
-        LOG.info("===========EWBF CUDA MINER WATCHDOG v{}===========", PARAMS.getProperty("programVersion"));
+        LOG.info("===========WATCHDOG FOR EWBF\'s CUDA ZEC MINER v{}===========", get("programVersion"));
         LOG.info("Got file with path {}.  Starting program...", logFilePath.toString());
         byte i = 2, j = 0;
         exitLabel:
@@ -94,26 +101,37 @@ public class ApplicationEntry {
             LOG.info("Starting check out file: {}.", logFilePath);
             try {
                 if (isHangingUp(logFilePath)) {
-                    LOG.warn("Miner is hanging! Killing process {}", PARAMS.getProperty("processName"));
+                    LOG.warn("Miner is hanging! Killing process {}", get("ewbfZecMinerProcessName"));
                     try {
-                        killProcess(PARAMS.getProperty("processName"));
-                        if (moveFile(logFilePath)) {
+                        if (killProcess(get("ewbfZecMinerProcessName")) && moveFile(logFilePath)) {
                             do {
                                 try {
-                                    LOG.info("Starting reboot computer...");
-                                    stats.put("totalTime", TOTAL_TIME.toString());
-                                    stats.put("totalShutdowns", Long.toString(Long.parseLong(stats.get("totalShutdowns")) + 1));
-                                    if (stats.get("todayDate").equals(currentDateTime.toLocalDate().toString())) {
-                                        stats.put("todayShutdowns", Long.toString(Long.parseLong(stats.get("todayShutdowns")) + 1));
+                                    if (get("needRestart").equals("0")) {
+
+                                        boolean isClaymoreEthMinerActive;
+                                        isClaymoreEthMinerActive = killProcess(get("claymoreETHMinerProcessName"));
+                                        TimeUnit.MILLISECONDS.sleep(sleepDurationMillis / 10);  // waiting for program closing
+                                        if (isClaymoreEthMinerActive) {
+                                            startApp(get("claymoreETHMinerProcessName"), get("claymoreEthMinerDirectory"), get
+                                                    ("claymoreEthMinerParams"));
+                                        }
+                                        startApp(get("ewbfZecMinerProcessName"), get("ewbfZecMinerDirectory"), get("ewbfZecMinerParams"));
+                                        TimeUnit.MILLISECONDS.sleep(sleepDurationMillis * 2); //waiting for new logs from miner
+                                        if (isHangingUp(logFilePath)) {
+                                            if (killProcess(get("ewbfZecMinerProcessName")) && moveFile(logFilePath)) {
+                                                if (isClaymoreEthMinerActive) {
+                                                    killProcess(get("claymoreETHMinerProcessName"));
+                                                }
+                                                saveStats(stats);
+                                                break exitLabel;
+                                            }
+                                        } else {
+                                            LOG.info("Miners restart were successfully");
+                                        }
                                     } else {
-                                        stats.put("todayShutdowns", "1");
-                                        stats.put("todayDate", currentDateTime.toLocalDate().toString());
+                                        saveStats(stats);
+                                        break exitLabel;
                                     }
-                                    stats.put("lastShutdownDateTime", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
-                                    writeStats(statsFilePath, stats);
-                                    rebootComputer(20);
-                                    LOG.info("Shutdown process has been executed.");
-                                    break exitLabel;
                                 }
                                 catch (IOException e) {
                                     LOG.warn("Shutdown process cannot be executed. Attempt to try again.", e);
@@ -134,8 +152,8 @@ public class ApplicationEntry {
                 LOG.warn("Checking out is interrupted. ", e);
             }
             try {
-                LOG.info("Sleeping for {} seconds", sleepDuration);
-                TimeUnit.MILLISECONDS.sleep((long) (sleepDuration * 1000));
+                LOG.info("Sleeping for {} seconds", sleepDurationSecs);
+                TimeUnit.MILLISECONDS.sleep(sleepDurationMillis);
             }
             catch (InterruptedException e) {
                 LOG.warn("Waiting is interrupted. Program is  executing now.", e);
@@ -146,6 +164,34 @@ public class ApplicationEntry {
             j++;
         }
         LOG.info("========EXIT=========");
+    }
+
+    private static void saveStats(Map<String, String> stats) throws IOException {
+        LocalDateTime currentDateTime = LocalDateTime.now();
+        LOG.info("Starting reboot computer...");
+        stats.put("totalTime", TOTAL_TIME.toString());
+        stats.put("totalShutdowns", Long.toString(Long.parseLong(stats.get("totalShutdowns")) + 1));
+        if (stats.get("todayDate").equals(currentDateTime.toLocalDate().toString())) {
+            stats.put("todayShutdowns", Long.toString(Long.parseLong(stats.get("todayShutdowns")) + 1));
+        } else {
+            stats.put("todayShutdowns", "1");
+            stats.put("todayDate", currentDateTime.toLocalDate().toString());
+        }
+        stats.put("lastShutdownDateTime", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        writeStats(statsFilePath, stats);
+        rebootComputer(20);
+        LOG.info("Shutdown process has been executed.");
+    }
+
+    public static void startApp(String processName, String processDirectory, String... commandLineAttribs) throws IOException {
+        StringBuilder command = new StringBuilder(String.format("cd \"%s\" && \"%s\"", processDirectory, processName));
+        if (commandLineAttribs != null) {
+            for (String commandLineAttrib : commandLineAttribs) {
+                command.append(" ").append(commandLineAttrib);
+            }
+        }
+        LOG.info("Starting {}", command);
+        new ProcessBuilder("cmd.exe", "/c", command.toString()).start();
     }
 
     private static void printTime(Duration duration) {
@@ -161,21 +207,21 @@ public class ApplicationEntry {
         Runtime.getRuntime().exec("SHUTDOWN /r /t " + delay + " /f /c  \"ZecMiner is working wrong.\" ");
     }
 
-    //cant get error stream from taskkill
-    public static void killProcess(String name) throws IOException, InterruptedException {
+    public static boolean killProcess(String name) throws IOException, InterruptedException {
         Runtime runtime = Runtime.getRuntime();
         Process killProcess = runtime.exec(String.format("TASKKILL /IM \"%s*\" /F /T", name));
+        InputStream in = killProcess.getErrorStream();
+
         if (killProcess.waitFor() == 0) {
             LOG.info("Kill process for {} was successfully finished!", name);
+            return true;
         } else {
             LOG.warn("Kill process for {} was finished with errors!", name);
-//            BufferedReader reader = new BufferedRead er(new InputStreamReader(killProcess.getInputStream(), Charset.forName("cp866")));
-//            StringBuilder builder = new StringBuilder(50);
-//            while (reader.ready()) {
-//                builder.append(reader.readLine());
-//            }
-//            reader.close();
-//            LOG.error("Error message from taskkill: ", builder.toString());
+            byte[] bytes = new byte[in.available()];
+            in.read(bytes);
+            String s = new String(bytes, Charset.forName("cp866"));
+            LOG.error("Error message from taskkill: {}", s);
+            return false;
         }
     }
 
@@ -206,16 +252,16 @@ public class ApplicationEntry {
         }
         for (int i = 0; i < fileLines.size(); i++) {
             String restartStringCandidate = fileLines.get(i);
-            if (restartStringCandidate.equalsIgnoreCase(PARAMS.getProperty("gpu0NotResponse"))
-                    || restartStringCandidate.equalsIgnoreCase(PARAMS.getProperty("gpu1NotResponse"))) {
+            if (restartStringCandidate.equalsIgnoreCase(get("gpu0NotResponse"))
+                    || restartStringCandidate.equalsIgnoreCase(get("gpu1NotResponse"))) {
                 return true;
             }
-            if (restartStringCandidate.equalsIgnoreCase(PARAMS.getProperty("gpu1RestartAttempt"))
-                    || restartStringCandidate.equalsIgnoreCase(PARAMS.getProperty("gpu0RestartAttempt"))) {
+            if (restartStringCandidate.equalsIgnoreCase(get("gpu1RestartAttempt"))
+                    || restartStringCandidate.equalsIgnoreCase(get("gpu0RestartAttempt"))) {
                 for (int j = i + 1; j < fileLines.size(); j++) {
                     String errorStringCandidate = fileLines.get(j);
-                    if (errorStringCandidate.equalsIgnoreCase(PARAMS.getProperty("gpu0ThreadExited46Error"))
-                            || errorStringCandidate.equalsIgnoreCase(PARAMS.getProperty("gpu1ThreadExited46Error"))) {
+                    if (errorStringCandidate.equalsIgnoreCase(get("gpu0ThreadExited46Error"))
+                            || errorStringCandidate.equalsIgnoreCase(get("gpu1ThreadExited46Error"))) {
                         return true;
                     }
                 }

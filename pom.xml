@@ -5,8 +5,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.hesky</groupId>
-    <artifactId>ewbfcudawatchdog</artifactId>
-    <version>0.1c</version>
+    <artifactId>czm-watchdog</artifactId>
+    <version>0.1d</version>
     <packaging>jar</packaging>
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>
@@ -42,7 +42,7 @@
                     <archive>
                         <manifest>
                             <addClasspath>true</addClasspath>
-                            <mainClass>com.hesky.ewbfcudawatchdog.ApplicationEntry</mainClass>
+                            <mainClass>com.hesky.ewbfcudawatchdog.Main</mainClass>
                             <addClasspath>true</addClasspath>
                         </manifest>
                     </archive>
@@ -80,9 +80,9 @@
                         <configuration>
                             <headerType>console</headerType>
                             <outfile>target/EWBFCudaMinerWatchdog.exe</outfile>
-                            <jar>target/ewbfcudawatchdog-0.1c.jar</jar>
+                            <jar>target/czm-watchdog-0.1d.jar</jar>
                             <classPath>
-                                <mainClass>com.hesky.ewbfcudawatchdog.ApplicationEntry</mainClass>
+                                <mainClass>com.hesky.ewbfcudawatchdog.Main</mainClass>
                             </classPath>
                             <manifest>target/classes/EWBFCudaMinerWatchdog.exe.manifest</manifest>
                             <jre>
